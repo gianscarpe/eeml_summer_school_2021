@@ -34,7 +34,7 @@ import random
 import reverb
 import rlax
 import time
-
+from tools import convolve1D
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -47,7 +47,7 @@ TrainingState = namedtuple('TrainingState', 'params, opt_state, step')
 class ReinforceAgent(acme.Actor):
 
   def __init__(self,
-               q_network,
+               pi_network,
                observation_spec,
                replay_capacity=100000,
                epsilon=0.1,
@@ -60,10 +60,10 @@ class ReinforceAgent(acme.Actor):
     self.replay_capacity = replay_capacity
     self._replay_buffer = ReplayBuffer(self.replay_capacity)
     self.last_loss = 0
-
+    self._done = False
     # Setup Network and loss with Haiku
     self._rng = hk.PRNGSequence(1)
-    self._pi_network = hk.without_apply_rng(hk.transform(q_network))
+    self._pi_network = hk.without_apply_rng(hk.transform(pi_network))
     
     # Initialize network
     dummy_observation = observation_spec.generate_value()
@@ -85,31 +85,32 @@ class ReinforceAgent(acme.Actor):
     return jnp.squeeze(action, axis=0)
 
   def select_action(self, observation):
-    return self._policy(self._state.params, next(self._rng), observation,
+    action = self._policy(self._state.params, next(self._rng), observation,
                         self.epsilon)
-
-  def q_values(self, observation):
-    return jnp.squeeze(
-        self._q_network.apply(self._state.params, observation[None, ...]),
-        axis=0)
+    action = tree_util.tree_map(lambda x: np.array(x).squeeze(axis=0), action)
+    return action
 
 
   @functools.partial(jax.jit, static_argnums=(0,))
   def _loss(self, params: hk.Params, transitions: Transitions):
 
-    def _reinforce(action_logits, a, G):
+    def _reinforce(action_logits, a, G, d):
       """TD error for a single transition."""
 
       reinforce_error = action_logits[a]
-      return - G * reinforce_error
+      return - d * G * reinforce_error
 
   
   # Compute batched action logits [Batch, actions]
     action_logits = softmax(self._pi_network.apply(params, transitions.s_t))
 
-    G = jax.lax.cumsum(transitions.r_t, reverse=True)
+    nsamples = len(action_logits)
+    
+    discount_sequence = jnp.power(transitions.d_t, jnp.arange(nsamples))
+    filtered_rewards = convolve1D(transitions.r_t[::-1], discount_sequence)
+    discounted_returns = filtered_rewards[:nsamples][::-1]
     batch_reinforce_error = jax.vmap(_reinforce)
-    reinforce_errors = batch_reinforce_error(action_logits, transitions.a_t, G)
+    reinforce_errors = batch_reinforce_error(action_logits, transitions.a_t, discounted_returns, discount_sequence)
     return jnp.sum(reinforce_errors)
 
   @functools.partial(jax.jit, static_argnums=(0,))
@@ -125,6 +126,7 @@ class ReinforceAgent(acme.Actor):
         params=new_params, opt_state=new_opt_state, step=state.step + 1)
     return new_state, loss
   def update(self):
+    if self._done:
       # Collect a minibatch of random transitions
       transitions = Transitions(*self._replay_buffer.sample(self._batch_size))
       # Compute loss and update parameters
@@ -132,9 +134,11 @@ class ReinforceAgent(acme.Actor):
       self._replay_buffer = ReplayBuffer(self.replay_capacity)
 
   def observe_first(self, timestep):
+    self._done = False
     self._replay_buffer.push(timestep, None)
 
   def observe(self, action, next_timestep):
+    self._done = next_timestep.last()
     self._replay_buffer.push(next_timestep, action)
 
 
@@ -166,13 +170,3 @@ class ReplayBuffer(object):
 
   def is_ready(self, batch_size):
     return batch_size <= len(self.buffer)
-
-def pi_network(observation: np.ndarray):
-  """Outputs action values given an observation."""
-  model = hk.Sequential([
-      hk.Flatten(),  # Flattens everything except the batch dimension
-      hk.nets.MLP([50, 50, environment_spec.actions.num_values])
-  ])
-  return model(observation)
-
-

@@ -1,46 +1,18 @@
-import acme
-from acme import environment_loop
-from acme import datasets
-from acme import specs
-from acme import wrappers
-from acme.wrappers import gym_wrapper
-from acme.agents.jax import dqn
-from acme.adders import reverb as adders
-from acme.utils import counting
-from acme.utils import loggers
-import base64
-import collections
-from collections import namedtuple
-import dm_env
-import enum
-import functools
-import gym
+
 import haiku as hk
-import io
-import imageio
-import itertools
-import jax
-from jax import tree_util
-# from jax.experimental import optix
-import optax
-import jax.numpy as jnp
-import matplotlib.pyplot as plt
+
 import numpy as np
-import pandas as pd
-import random
-import reverb
-import rlax
-import time
+
 from world import build_gridworld_task, ObservationType, setup_environment
 from models.reinforce import ReinforceAgent
-from tools import run_mc_loop
+from tools import run_loop
 import logging
 
 if __name__ == "__main__":
     epsilon = 1. #@param {type:"number"}
     num_episodes = 100 #@param {type:"number"}
 
-    max_episode_length = 200
+    max_episode_length = 500
 
     # Environment
     grid = build_gridworld_task(
@@ -67,7 +39,7 @@ if __name__ == "__main__":
         batch_size=10,
         learning_rate=1e-3)
 
-    returns = run_mc_loop(
+    returns = run_loop(
         environment=environment,
         agent=agent,
         num_episodes=num_episodes,

@@ -245,3 +245,9 @@ def run_mc_loop(environment,
     if num_steps is not None and num_total_steps >= num_steps:
       break
   return all_returns
+
+def convolve1D(x, y):
+  # Based on https://github.com/google/jax/issues/1561
+  x_jax = jnp.reshape(x,(1,1,len(x)))
+  y_jax = jnp.flip(jnp.reshape(y,(1,1,len(y))),2)
+  return jnp.ravel(jax.lax.conv_general_dilated(x_jax,y_jax,[1],[(len(x)-1,len(x)-1)]))
