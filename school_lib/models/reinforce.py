@@ -34,7 +34,7 @@ import random
 import reverb
 import rlax
 import time
-from tools import convolve1D
+from ..tools import convolve1D
 import warnings
 warnings.filterwarnings('ignore')
 
