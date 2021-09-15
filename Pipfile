@@ -9,6 +9,7 @@ jupyterlab = "*"
 gym = "*"
 rise = "*"
 pyglet = "*"
+torch = "*"
 
 [dev-packages]
 
